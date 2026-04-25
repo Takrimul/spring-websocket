@@ -56,6 +56,7 @@ public class ChatMessage {
     private String from;         // Sender username (set server-side from Principal)
     private String to;           // Recipient username (for DMs) or room ID
     private String content;      // Message text (null for TYPING, SEEN, etc.)
+    private Boolean encrypted;   // true if content is ciphertext
     private String roomId;       // Chat room identifier
     private String seenMessageId;// For SEEN events: which message was seen
     private String deliveredMessageId; // For DELIVERED events: which message was delivered
@@ -77,6 +78,7 @@ public class ChatMessage {
         m.to          = to;
         m.roomId      = roomId;
         m.content     = content;
+        m.encrypted   = false;
         m.timestamp   = Instant.now();
         return m;
     }
@@ -155,6 +157,9 @@ public class ChatMessage {
 
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+
+    public Boolean getEncrypted() { return encrypted; }
+    public void setEncrypted(Boolean encrypted) { this.encrypted = encrypted; }
 
     public String getRoomId() { return roomId; }
     public void setRoomId(String roomId) { this.roomId = roomId; }

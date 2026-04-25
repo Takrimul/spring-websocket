@@ -1,6 +1,9 @@
 package com.example.chat.security;
 
-import com.example.chat.model.ChatMessage;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.simp.stomp.StompCommand;
@@ -11,6 +14,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.stereotype.Component;
 
 import java.security.Principal;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -49,6 +53,11 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Component
 public class AuthChannelInterceptor implements ChannelInterceptor {
+    @Value("${chat.security.jwt-secret}")
+    private String jwtSecret;
+
+    @Value("${chat.security.allow-dev-token:true}")
+    private boolean allowDevToken;
 
     /**
      * In-memory session store: sessionId → username.
@@ -142,9 +151,21 @@ public class AuthChannelInterceptor implements ChannelInterceptor {
         if (token.isEmpty()) {
             return null;
         }
-        // DEMO ONLY: token IS the username
-        // Production: return jwtParser.parseClaimsJws(token).getBody().getSubject();
-        return token;
+        try {
+            Claims claims = Jwts.parserBuilder()
+                    .setSigningKey(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)))
+                    .build()
+                    .parseClaimsJws(token)
+                    .getBody();
+            String subject = claims.getSubject();
+            return (subject == null || subject.isBlank()) ? null : subject;
+        } catch (Exception ignored) {
+            // Dev-only fallback token mode: "Bearer alice"
+            if (allowDevToken) {
+                return token;
+            }
+            return null;
+        }
     }
 
     /**

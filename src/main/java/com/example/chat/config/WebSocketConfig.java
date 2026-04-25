@@ -2,6 +2,7 @@ package com.example.chat.config;
 
 import com.example.chat.security.AuthChannelInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
@@ -36,6 +37,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Autowired
     private AuthChannelInterceptor authChannelInterceptor;
 
+    @Value("${chat.websocket.allowed-origins:http://localhost:8080}")
+    private String allowedOrigins;
+
     /**
      * Step 1 — Register the WebSocket endpoint.
      *
@@ -51,7 +55,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry
                 .addEndpoint("/ws")                     // WebSocket URL
-                .setAllowedOriginPatterns("*")          // CORS — restrict in prod
+                .setAllowedOriginPatterns(allowedOrigins.split(","))          // CORS — restrict in prod
                 .withSockJS();                          // Enable SockJS fallback
     }
 

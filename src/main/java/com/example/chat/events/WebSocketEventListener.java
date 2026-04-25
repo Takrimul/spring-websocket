@@ -9,10 +9,8 @@ import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.messaging.SessionConnectedEvent;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
-import org.springframework.web.socket.messaging.SessionSubscribeEvent;
 
 import java.security.Principal;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -55,20 +53,7 @@ public class WebSocketEventListener {
     @Autowired
     private ChatService chatService;
 
-    /**
-     * Room presence: which users are in each room.
-     * roomId → Set of online usernames.
-     * ConcurrentHashMap + ConcurrentHashMap.newKeySet() = thread-safe.
-     */
-    private final Map<String, Set<String>> roomPresence = new ConcurrentHashMap<>();
-    private final Map<String, Set<String>> roomMembers = new ConcurrentHashMap<>();
-
-    /**
-     * Session → room mapping so we know which room to update on disconnect.
-     * A user can only be in one room per session in this demo.
-     * In production, a user might subscribe to multiple rooms.
-     */
-    private final Map<String, String> sessionRoomMap = new ConcurrentHashMap<>();
+    private final Map<String, Set<String>> onlineSessionsByPhone = new ConcurrentHashMap<>();
 
     // =========================================================================
     // CONNECTED
@@ -89,15 +74,14 @@ public class WebSocketEventListener {
         Principal principal = accessor.getUser();
 
         if (principal != null) {
-            String username = principal.getName();
-            System.out.printf("[EVENT] Connected: %s (session=%s)%n",
-                    username, accessor.getSessionId());
+            String phone = principal.getName();
+            String sessionId = accessor.getSessionId();
+            onlineSessionsByPhone.computeIfAbsent(phone, ignored -> ConcurrentHashMap.newKeySet()).add(sessionId);
 
-            // Optionally send a welcome message to this user only
-            // messagingTemplate.convertAndSendToUser(
-            //     username, "/queue/notifications",
-            //     ChatMessage.system("Welcome back, " + username + "!", null)
-            // );
+            // Replay unread messages on reconnect/login.
+            for (ChatMessage message : chatService.getPendingForUser(phone)) {
+                messagingTemplate.convertAndSendToUser(phone, "/queue/messages", message);
+            }
         }
     }
 
@@ -134,104 +118,18 @@ public class WebSocketEventListener {
 
         if (principal == null) return;
 
-        String username = principal.getName();
-
-        // Find which room this session was in and clean up
-        String roomId = sessionRoomMap.remove(sessionId);
-        if (roomId != null) {
-            Set<String> presentUsers = roomPresence.get(roomId);
-            if (presentUsers != null) {
-                presentUsers.remove(username);
+        String phone = principal.getName();
+        Set<String> sessions = onlineSessionsByPhone.get(phone);
+        if (sessions != null) {
+            sessions.remove(sessionId);
+            if (sessions.isEmpty()) {
+                onlineSessionsByPhone.remove(phone);
             }
-
-            // Broadcast "left the room" to everyone remaining
-            ChatMessage leaveMsg = ChatMessage.system(
-                    username + " disconnected", roomId
-            );
-            messagingTemplate.convertAndSend(
-                    "/topic/chat.room." + roomId, leaveMsg
-            );
         }
     }
 
-    // =========================================================================
-    // SUBSCRIBED — track which room a session joined
-    // =========================================================================
-
-    /**
-     * Fired when a client sends a STOMP SUBSCRIBE frame.
-     * We use this to update our room presence map.
-     *
-     * If Bob subscribes to /topic/chat.room.42:
-     *   - Add Bob to roomPresence["42"]
-     *   - Map sessionId → "42" so we can clean up on disconnect
-     *   - Broadcast "Bob joined" to room 42
-     */
-    @EventListener
-    public void handleWebSocketSubscribeListener(SessionSubscribeEvent event) {
-        StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
-        Principal principal = accessor.getUser();
-        String destination  = accessor.getDestination();
-        String sessionId    = accessor.getSessionId();
-
-        if (principal == null || destination == null) return;
-
-        String username = principal.getName();
-
-        // Only track room subscriptions, not user-private queues
-        if (destination.startsWith("/topic/chat.room.")) {
-            String roomId = destination.substring("/topic/chat.room.".length());
-
-            // Add user to the room's presence set
-            roomPresence
-                    .computeIfAbsent(roomId, k -> ConcurrentHashMap.newKeySet())
-                    .add(username);
-            roomMembers
-                    .computeIfAbsent(roomId, k -> ConcurrentHashMap.newKeySet())
-                    .add(username);
-
-            // Track session → room for disconnect cleanup
-            sessionRoomMap.put(sessionId, roomId);
-
-            // Broadcast join notification
-            ChatMessage joinMsg = ChatMessage.system(
-                    username + " joined the room", roomId
-            );
-            messagingTemplate.convertAndSend(
-                    "/topic/chat.room." + roomId, joinMsg
-            );
-
-            // Replay pending offline messages immediately on room subscribe.
-            for (ChatMessage pending : chatService.drainPendingMessages(username, roomId)) {
-                ChatMessage replay = new ChatMessage();
-                replay.setId(pending.getId());
-                replay.setType(pending.getType());
-                replay.setFrom(pending.getFrom());
-                replay.setTo(pending.getTo());
-                replay.setContent(pending.getContent());
-                replay.setRoomId(pending.getRoomId());
-                replay.setSeenMessageId(pending.getSeenMessageId());
-                replay.setDeliveredMessageId(pending.getDeliveredMessageId());
-                replay.setTimestamp(pending.getTimestamp());
-                replay.setHistory(true);
-                messagingTemplate.convertAndSendToUser(username, "/queue/history", replay);
-            }
-
-            System.out.printf("[EVENT] %s subscribed to room:%s | online: %s%n",
-                    username, roomId, roomPresence.get(roomId));
-        }
-    }
-
-    // =========================================================================
-    // PUBLIC API — other components can query presence
-    // =========================================================================
-
-    /** Returns the set of usernames currently online in a room. */
-    public Set<String> getOnlineUsers(String roomId) {
-        return new HashSet<>(roomPresence.getOrDefault(roomId, Set.of()));
-    }
-
-    public Set<String> getRoomMembers(String roomId) {
-        return new HashSet<>(roomMembers.getOrDefault(roomId, Set.of()));
+    public boolean isOnline(String phone) {
+        Set<String> sessions = onlineSessionsByPhone.get(phone);
+        return sessions != null && !sessions.isEmpty();
     }
 }

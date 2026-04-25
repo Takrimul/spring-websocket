@@ -3,674 +3,370 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>WebSocket Chat Test Client</title>
-
+<title>DuoChat</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
-
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #f5f5f0;
-    color: #1a1a18;
-    min-height: 100vh;
-    padding: 16px;
-  }
-
-  h1 {
-    font-size: 15px;
-    font-weight: 500;
-    color: #5f5e5a;
-    text-align: center;
-    margin-bottom: 16px;
-    letter-spacing: 0.01em;
-  }
-
-  .panels {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    max-width: 960px;
-    margin: 0 auto;
-  }
-
-  .panel {
-    background: #fff;
-    border: 0.5px solid #d3d1c7;
-    border-radius: 12px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .panel-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
-    border-bottom: 0.5px solid #e8e7e2;
-  }
-
-  .avatar {
-    width: 32px; height: 32px;
-    border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 13px; font-weight: 500;
-    flex-shrink: 0;
-  }
-  .avatar.alice { background: #EEEDFE; color: #3C3489; }
-  .avatar.bob   { background: #E1F5EE; color: #085041; }
-
-  .panel-title { font-size: 14px; font-weight: 500; flex: 1; }
-
-  .status-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #d3d1c7;
-    transition: background 0.3s;
-  }
-  .status-dot.connected { background: #1D9E75; }
-
-  .connect-btn {
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 6px;
-    border: 0.5px solid #d3d1c7;
-    background: transparent;
-    cursor: pointer;
-    color: #3d3d3a;
-    transition: background 0.15s;
-  }
-  .connect-btn:hover { background: #f5f5f0; }
-  .connect-btn.connected { border-color: #F09595; color: #A32D2D; }
-
-  .messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-height: 320px;
-    max-height: 380px;
-  }
-
-  .msg {
-    display: flex;
-    flex-direction: column;
-    max-width: 85%;
-  }
-  .msg.mine  { align-self: flex-end; align-items: flex-end; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #f4f4f0; color: #1a1a18; padding: 16px; }
+  .app { max-width: 780px; margin: 0 auto; }
+  .card { background: #fff; border: 1px solid #d8d6ce; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+  h1 { font-size: 22px; margin-bottom: 12px; }
+  h2 { font-size: 16px; margin-bottom: 10px; }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; }
+  input, textarea, button { font: inherit; }
+  input, textarea { width: 100%; border: 1px solid #d8d6ce; border-radius: 8px; padding: 8px 10px; }
+  button { border: none; border-radius: 8px; padding: 8px 12px; cursor: pointer; background: #534ab7; color: #fff; }
+  button.secondary { background: #0f6e56; }
+  button.light { background: #efeee9; color: #222; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #auth-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  #chat-view { display: none; }
+  #messages { min-height: 360px; max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid #eceae2; border-radius: 10px; background: #fafaf8; }
+  .msg { max-width: 78%; display: flex; flex-direction: column; gap: 2px; }
+  .msg.mine { align-self: flex-end; align-items: flex-end; }
   .msg.theirs { align-self: flex-start; align-items: flex-start; }
-
-  .bubble {
-    padding: 7px 11px;
-    border-radius: 12px;
-    font-size: 13px;
-    line-height: 1.5;
-    word-break: break-word;
-  }
-  .mine .bubble   { background: #534AB7; color: #fff; border-bottom-right-radius: 3px; }
-  .theirs .bubble { background: #f1efe8; color: #1a1a18; border-bottom-left-radius: 3px; }
-
-  .msg-meta {
-    font-size: 10px;
-    color: #888780;
-    margin-top: 2px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-  .tick { font-size: 10px; }
-  .tick.seen { color: #1D9E75; }
-
-  .system-msg {
-    align-self: center;
-    font-size: 11px;
-    color: #888780;
-    background: #f5f5f0;
-    padding: 3px 10px;
-    border-radius: 20px;
-    border: 0.5px solid #e8e7e2;
-  }
-
-  .error-msg {
-    align-self: center;
-    font-size: 11px;
-    color: #A32D2D;
-    background: #FCEBEB;
-    padding: 3px 10px;
-    border-radius: 20px;
-    border: 0.5px solid #F09595;
-  }
-
-  .typing-indicator {
-    font-size: 11px;
-    color: #888780;
-    padding: 2px 4px;
-    min-height: 18px;
-    font-style: italic;
-  }
-
-  .input-area {
-    padding: 10px 12px;
-    border-top: 0.5px solid #e8e7e2;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .msg-input {
-    width: 100%;
-    padding: 8px 10px;
-    font-size: 13px;
-    border: 0.5px solid #d3d1c7;
-    border-radius: 8px;
-    outline: none;
-    font-family: inherit;
-    resize: none;
-    height: 60px;
-    color: #1a1a18;
-    background: #fff;
-  }
-  .msg-input:focus { border-color: #7F77DD; }
-  .msg-input:disabled { background: #f5f5f0; color: #888780; }
-
-  .btn-row {
-    display: flex;
-    gap: 6px;
-  }
-
-  .send-btn {
-    flex: 1;
-    padding: 7px;
-    font-size: 13px;
-    font-weight: 500;
-    border-radius: 8px;
-    border: none;
-    cursor: pointer;
-    transition: opacity 0.15s;
-  }
-  .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .send-btn.alice-btn { background: #534AB7; color: #fff; }
-  .send-btn.bob-btn   { background: #0F6E56; color: #fff; }
-
-  .action-btn {
-    padding: 7px 10px;
-    font-size: 12px;
-    border: 0.5px solid #d3d1c7;
-    border-radius: 8px;
-    background: transparent;
-    cursor: pointer;
-    color: #5f5e5a;
-    transition: background 0.15s;
-  }
-  .action-btn:hover { background: #f5f5f0; }
-  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  .log-panel {
-    max-width: 960px;
-    margin: 12px auto 0;
-    background: #1a1a18;
-    border-radius: 10px;
-    padding: 12px 14px;
-    max-height: 160px;
-    overflow-y: auto;
-  }
-
-  .log-title {
-    font-size: 11px;
-    color: #888780;
-    font-family: monospace;
-    margin-bottom: 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-
-  .log-line {
-    font-size: 11px;
-    font-family: 'Courier New', monospace;
-    line-height: 1.6;
-    color: #9FE1CB;
-  }
-  .log-line.err { color: #F09595; }
-  .log-line.out { color: #FAC775; }
-  .log-line.sys { color: #888780; }
-
-  .room-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 14px;
-    background: #f9f9f7;
-    border-bottom: 0.5px solid #e8e7e2;
-    font-size: 12px;
-    color: #5f5e5a;
-  }
-  .room-bar input {
-    width: 60px;
-    padding: 3px 6px;
-    font-size: 12px;
-    border: 0.5px solid #d3d1c7;
-    border-radius: 5px;
-    font-family: monospace;
-    background: #fff;
-    color: #1a1a18;
-  }
+  .bubble { border-radius: 12px; padding: 8px 10px; line-height: 1.45; font-size: 14px; }
+  .mine .bubble { background: #534ab7; color: #fff; border-bottom-right-radius: 3px; }
+  .theirs .bubble { background: #eceae2; color: #222; border-bottom-left-radius: 3px; }
+  .meta { font-size: 11px; color: #8a887f; display: flex; gap: 6px; align-items: center; }
+  .tick.seen { color: #1d9e75; }
+  .system { align-self: center; font-size: 11px; color: #666; background: #efeee8; border-radius: 999px; padding: 3px 10px; }
+  .error { color: #9e1d1d; font-size: 12px; margin-top: 4px; }
+  #log { margin-top: 8px; max-height: 130px; overflow-y: auto; background: #1b1b18; color: #9fe1cb; border-radius: 8px; padding: 8px; font-family: monospace; font-size: 11px; }
+  .status { font-size: 12px; color: #666; }
 </style>
 </head>
 <body>
+<div class="app">
+  <h1>DuoChat</h1>
 
-<h1>WebSocket Chat Test Client &mdash; localhost:8080</h1>
-
-<div class="panels">
-
-  <!-- ALICE PANEL -->
-  <div class="panel" id="alice-panel">
-    <div class="panel-header">
-      <div class="avatar alice">A</div>
+  <div id="auth-view" class="card">
+    <div id="auth-grid">
       <div>
-        <div class="panel-title">Alice</div>
+        <h2>Register</h2>
+        <div class="row"><input id="reg-phone" placeholder="+8801XXXXXXXXX"/></div>
+        <div class="row"><input id="reg-pass" type="password" placeholder="Password (min 8 chars)"/></div>
+        <button onclick="register()">Create Account</button>
       </div>
-      <div class="status-dot" id="alice-dot"></div>
-      <button class="connect-btn" id="alice-connect-btn" onclick="toggleConnect('alice')">Connect</button>
-    </div>
-
-    <div class="room-bar">
-      Room&nbsp;
-      <input type="text" id="alice-room" value="42" maxlength="20"/>
-      <span style="color:#b4b2a9">| subscribes to /topic/chat.room.{id}</span>
-    </div>
-
-    <div class="messages" id="alice-messages"></div>
-    <div class="typing-indicator" id="alice-typing"></div>
-
-    <div class="input-area">
-      <textarea class="msg-input" id="alice-input" placeholder="Type a message..." disabled
-        oninput="handleTyping('alice')" onkeydown="handleKey(event,'alice')"></textarea>
-      <div class="btn-row">
-        <button class="send-btn alice-btn" onclick="sendMsg('alice')" disabled id="alice-send">Send</button>
-        <button class="action-btn" onclick="sendTyping('alice', true)"  disabled id="alice-typing-btn" title="Send TYPING frame">Typing</button>
-        <button class="action-btn" onclick="sendTyping('alice', false)" disabled id="alice-stop-btn"   title="Send STOP_TYPING">Stop</button>
-        <button class="action-btn" onclick="sendEmpty('alice')"         disabled id="alice-err-btn"    title="Send empty msg to trigger error">Err</button>
+      <div>
+        <h2>Login</h2>
+        <div class="row"><input id="login-phone" placeholder="+8801XXXXXXXXX"/></div>
+        <div class="row"><input id="login-pass" type="password" placeholder="Password"/></div>
+        <button class="secondary" onclick="login()">Login</button>
       </div>
     </div>
+    <div id="auth-error" class="error"></div>
   </div>
 
-  <!-- BOB PANEL -->
-  <div class="panel" id="bob-panel">
-    <div class="panel-header">
-      <div class="avatar bob">B</div>
+  <div id="chat-view" class="card">
+    <div class="row" style="justify-content: space-between; align-items:center;">
       <div>
-        <div class="panel-title">Bob</div>
+        <div><strong id="me-phone"></strong></div>
+        <div class="status" id="ws-status">Disconnected</div>
       </div>
-      <div class="status-dot" id="bob-dot"></div>
-      <button class="connect-btn" id="bob-connect-btn" onclick="toggleConnect('bob')">Connect</button>
+      <button class="light" onclick="logout()">Logout</button>
+    </div>
+    <div class="row">
+      <input id="peer-phone" placeholder="Receiver phone number"/>
+      <button class="light" onclick="openChat()">Open Chat</button>
+    </div>
+    <div class="row">
+      <input id="shared-key" type="password" placeholder="Optional shared key for E2EE"/>
     </div>
 
-    <div class="room-bar">
-      Room&nbsp;
-      <input type="text" id="bob-room" value="42" maxlength="20"/>
-      <span style="color:#b4b2a9">| subscribes to /topic/chat.room.{id}</span>
+    <div id="messages"></div>
+
+    <div class="row" style="margin-top: 10px;">
+      <textarea id="message-input" placeholder="Type a message..." rows="3"></textarea>
     </div>
-
-    <div class="messages" id="bob-messages"></div>
-    <div class="typing-indicator" id="bob-typing"></div>
-
-    <div class="input-area">
-      <textarea class="msg-input" id="bob-input" placeholder="Type a message..." disabled
-        oninput="handleTyping('bob')" onkeydown="handleKey(event,'bob')"></textarea>
-      <div class="btn-row">
-        <button class="send-btn bob-btn" onclick="sendMsg('bob')" disabled id="bob-send">Send</button>
-        <button class="action-btn" onclick="sendTyping('bob', true)"  disabled id="bob-typing-btn">Typing</button>
-        <button class="action-btn" onclick="sendTyping('bob', false)" disabled id="bob-stop-btn">Stop</button>
-        <button class="action-btn" onclick="sendEmpty('bob')"         disabled id="bob-err-btn">Err</button>
-      </div>
+    <div class="row">
+      <button onclick="sendMessage()">Send</button>
     </div>
-  </div>
-
-</div>
-
-<!-- STOMP FRAME LOG -->
-<div class="log-panel" id="log-panel">
-  <div class="log-title">STOMP frame log</div>
-  <div id="log-lines">
-    <div class="log-line sys">Waiting for connections...</div>
+    <div id="chat-error" class="error"></div>
+    <div id="log"></div>
   </div>
 </div>
 
 <script>
 const SERVER = 'http://localhost:8080/ws';
-const ROOM_ID = () => ({
-  alice: document.getElementById('alice-room').value || '42',
-  bob:   document.getElementById('bob-room').value   || '42',
-});
+let token = null;
+let myPhone = null;
+let currentPeer = null;
+let stomp = null;
+const renderedIds = new Set();
+const sentDelivered = new Set();
+const sentSeen = new Set();
+const messagesByPeer = {};
 
-const state = {
-  alice: { client: null, connected: false, typingTimer: null, msgCount: 0 },
-  bob:   { client: null, connected: false, typingTimer: null, msgCount: 0 },
-};
-
-const seenMap = {};
-const renderedMessageIds = {
-  alice: new Set(),
-  bob: new Set(),
-};
-const deliveredSentIds = {
-  alice: new Set(),
-  bob: new Set(),
-};
-const seenSentIds = {
-  alice: new Set(),
-  bob: new Set(),
-};
-
-function log(text, type = '') {
-  const el = document.getElementById('log-lines');
-  const line = document.createElement('div');
-  line.className = 'log-line' + (type ? ' ' + type : '');
-  const ts = new Date().toTimeString().slice(0,8);
-  line.textContent = '[' + ts + '] ' + text;
-  el.appendChild(line);
-  const panel = document.getElementById('log-panel');
-  panel.scrollTop = panel.scrollHeight;
+function log(line) {
+  const el = document.getElementById('log');
+  const ts = new Date().toTimeString().slice(0, 8);
+  const div = document.createElement('div');
+  div.textContent = `[${ts}] ${line}`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
 }
 
-function toggleConnect(user) {
-  if (state[user].connected) {
-    disconnect(user);
-  } else {
-    connect(user);
+function showError(target, text) {
+  document.getElementById(target).textContent = text || '';
+}
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+async function register() {
+  showError('auth-error', '');
+  try {
+    const data = await api('/api/auth/register', {
+      phone: document.getElementById('reg-phone').value.trim(),
+      password: document.getElementById('reg-pass').value
+    });
+    token = data.token; myPhone = data.phone;
+    await openChatView();
+  } catch (e) {
+    showError('auth-error', String(e.message || e));
   }
 }
 
-function connect(user) {
-  const room = ROOM_ID()[user];
-  log(user + ': connecting to ' + SERVER + ' as ' + user + '...', 'sys');
-
-  const socket = new SockJS(SERVER);
-  const client = Stomp.over(socket);
-
-  client.debug = (msg) => {
-    if (msg.includes('SEND') || msg.includes('MESSAGE') || msg.includes('CONNECT') || msg.includes('ERROR')) {
-      log(user.toUpperCase() + ' STOMP: ' + msg.trim().split('\n')[0], 'sys');
-    }
-  };
-
-  const headers = { Authorization: 'Bearer ' + user };
-
-  client.connect(headers, (frame) => {
-    state[user].client    = client;
-    state[user].connected = true;
-    log(user + ': connected ' + frame, 'out');
-    updateUI(user, true);
-
-    const roomId = ROOM_ID()[user];
-
-    client.subscribe('/user/queue/history', (msg) => {
-      const data = JSON.parse(msg.body);
-      handleIncoming(user, data);
+async function login() {
+  showError('auth-error', '');
+  try {
+    const data = await api('/api/auth/login', {
+      phone: document.getElementById('login-phone').value.trim(),
+      password: document.getElementById('login-pass').value
     });
+    token = data.token; myPhone = data.phone;
+    await openChatView();
+  } catch (e) {
+    showError('auth-error', String(e.message || e));
+  }
+}
 
-    client.subscribe('/user/queue/notifications', (msg) => {
-      const data = JSON.parse(msg.body);
-      handleNotification(user, data);
+async function openChatView() {
+  document.getElementById('auth-view').style.display = 'none';
+  document.getElementById('chat-view').style.display = 'block';
+  document.getElementById('me-phone').textContent = `Logged in: ${myPhone}`;
+  await connectWs();
+}
+
+function logout() {
+  if (stomp) {
+    stomp.disconnect(() => {});
+  }
+  token = null; myPhone = null; currentPeer = null; stomp = null;
+  renderedIds.clear(); sentDelivered.clear(); sentSeen.clear();
+  document.getElementById('messages').innerHTML = '';
+  document.getElementById('auth-view').style.display = 'block';
+  document.getElementById('chat-view').style.display = 'none';
+}
+
+function connectWs() {
+  return new Promise((resolve, reject) => {
+    const socket = new SockJS(SERVER);
+    stomp = Stomp.over(socket);
+    stomp.debug = () => {};
+    stomp.connect({ Authorization: `Bearer ${token}` }, () => {
+      document.getElementById('ws-status').textContent = 'Connected';
+      stomp.subscribe('/user/queue/messages', async (frame) => {
+        const msg = JSON.parse(frame.body);
+        await handleIncomingMessage(msg);
+      });
+      stomp.subscribe('/user/queue/notifications', (frame) => {
+        const msg = JSON.parse(frame.body);
+        handleNotification(msg);
+      });
+      stomp.subscribe('/user/queue/errors', (frame) => {
+        const msg = JSON.parse(frame.body);
+        showError('chat-error', `${msg.errorCode}: ${msg.errorDetail}`);
+      });
+      resolve();
+    }, (err) => {
+      document.getElementById('ws-status').textContent = 'Disconnected';
+      reject(err);
     });
-
-    client.subscribe('/user/queue/errors', (msg) => {
-      const data = JSON.parse(msg.body);
-      log(user + ' ERROR: ' + data.errorCode + ' - ' + data.errorDetail, 'err');
-      appendError(user, data.errorCode + ': ' + data.errorDetail);
-    });
-
-    client.subscribe('/topic/chat.room.' + roomId, (msg) => {
-      const data = JSON.parse(msg.body);
-      handleIncoming(user, data);
-    });
-
-    appendSystem(user, 'Connected to room ' + roomId);
-    requestHistory(user, roomId, 250);
-    requestHistory(user, roomId, 900);
-
-  }, (err) => {
-    log(user + ': connection error: ' + err, 'err');
-    appendError(user, 'Connection failed: ' + err);
-    state[user].connected = false;
-    updateUI(user, false);
   });
 }
 
-function disconnect(user) {
-  if (state[user].client) {
-    state[user].client.disconnect(() => {
-      log(user + ': disconnected', 'sys');
-    });
-    state[user].client    = null;
-    state[user].connected = false;
-    updateUI(user, false);
-    appendSystem(user, 'Disconnected');
-  }
+function normalizePhoneInput(v) {
+  let p = String(v || '').trim().replace(/[\\s\\-()]/g, '');
+  if (p && !p.startsWith('+')) p = '+' + p;
+  return p;
 }
 
-function handleIncoming(user, data) {
-  const me = user;
-
-  if (data.type === 'TYPING' || data.type === 'STOP_TYPING') {
-    if (data.from === me) return;
-    const indicator = document.getElementById(user + '-typing');
-    if (data.type === 'TYPING') {
-      indicator.textContent = data.from + ' is typing...';
-    } else {
-      indicator.textContent = '';
-    }
+async function openChat() {
+  showError('chat-error', '');
+  const peer = normalizePhoneInput(document.getElementById('peer-phone').value);
+  if (!peer) {
+    showError('chat-error', 'Receiver phone is required');
     return;
   }
+  currentPeer = peer;
+  if (!messagesByPeer[currentPeer]) messagesByPeer[currentPeer] = [];
+  renderConversation();
+  if (stomp) {
+    stomp.send('/app/chat.sync', {}, JSON.stringify({ withPhone: currentPeer }));
+    log(`Sync conversation with ${currentPeer}`);
+  }
+}
 
-  if (data.type === 'SYSTEM') {
-    appendSystem(user, data.content);
+async function sendMessage() {
+  showError('chat-error', '');
+  if (!stomp || !currentPeer) {
+    showError('chat-error', 'Open a chat and connect first');
     return;
   }
-
-  if (data.type === 'DELIVERED' || data.type === 'SEEN') {
-    if (data.to && data.to !== user) return;
-    handleNotification(user, data);
-    return;
-  }
-
-  if (data.type === 'CHAT') {
-    if (data.id && renderedMessageIds[user].has(data.id)) {
-      return;
-    }
-    const isMine = data.from === me;
-    appendMessage(user, data, isMine);
-    if (data.id) renderedMessageIds[user].add(data.id);
-    log(user + ' RECV CHAT from ' + data.from + ': ' + data.content + (data.history ? ' [history]' : ''), '');
-
-    if (!isMine && data.id) {
-      sendDelivered(user, data.id, data.from);
-      setTimeout(() => sendSeen(user, data.id, data.from), 1200);
-    }
-  }
-}
-
-function requestHistory(user, roomId, delayMs) {
-  setTimeout(() => {
-    if (!state[user].connected || !state[user].client) return;
-    state[user].client.send('/app/chat.history/' + roomId, {}, JSON.stringify({ roomId }));
-    log(user + ' REQUEST history for room ' + roomId + ' (+' + delayMs + 'ms)', 'sys');
-  }, delayMs);
-}
-
-function handleNotification(user, data) {
-  if (data.type === 'DELIVERED') {
-    log(user + ': message ' + data.deliveredMessageId + ' was DELIVERED to ' + data.from, 'out');
-    markDelivered(user, data.deliveredMessageId);
-    return;
-  }
-
-  if (data.type === 'SEEN') {
-    log(user + ': message ' + data.seenMessageId + ' was SEEN by ' + data.from, 'out');
-    markSeen(user, data.seenMessageId);
-  }
-}
-
-function appendMessage(user, data, isMine) {
-  const container = document.getElementById(user + '-messages');
-  const wrap = document.createElement('div');
-  wrap.className = 'msg ' + (isMine ? 'mine' : 'theirs');
-  if (isMine) wrap.dataset.msgId = data.id;
-
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-  bubble.textContent = data.content;
-  wrap.appendChild(bubble);
-
-  const meta = document.createElement('div');
-  meta.className = 'msg-meta';
-  const ts = data.timestamp ? new Date(data.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
-  meta.innerHTML = '<span>' + (isMine ? 'You' : data.from) + '</span><span>' + ts + '</span>';
-
-  if (isMine) {
-    const tick = document.createElement('span');
-    tick.className = 'tick';
-    tick.id = 'tick-' + data.id;
-    tick.textContent = '\u2713';
-    tick.title = 'Sent';
-    meta.appendChild(tick);
-  }
-
-  wrap.appendChild(meta);
-  container.appendChild(wrap);
-  container.scrollTop = container.scrollHeight;
-}
-
-function markSeen(user, msgId) {
-  const tick = document.getElementById('tick-' + msgId);
-  if (tick) {
-    tick.textContent = '\u2713\u2713';
-    tick.classList.add('seen');
-    tick.title = 'Seen';
-  }
-}
-
-function markDelivered(user, msgId) {
-  const tick = document.getElementById('tick-' + msgId);
-  if (tick) {
-    tick.textContent = '\u2713\u2713';
-    tick.title = 'Delivered';
-  }
-}
-
-function appendSystem(user, text) {
-  const container = document.getElementById(user + '-messages');
-  const el = document.createElement('div');
-  el.className = 'system-msg';
-  el.textContent = text;
-  container.appendChild(el);
-  container.scrollTop = container.scrollHeight;
-}
-
-function appendError(user, text) {
-  const container = document.getElementById(user + '-messages');
-  const el = document.createElement('div');
-  el.className = 'error-msg';
-  el.textContent = text;
-  container.appendChild(el);
-  container.scrollTop = container.scrollHeight;
-}
-
-function sendMsg(user) {
-  if (!state[user].connected) return;
-  const input = document.getElementById(user + '-input');
-  const content = input.value.trim();
-  if (!content) return;
-  const room = ROOM_ID()[user];
-
-  const payload = JSON.stringify({ content, roomId: room });
-  state[user].client.send('/app/chat.send/' + room, {}, payload);
-  log(user + ' SEND: ' + content, 'out');
+  const input = document.getElementById('message-input');
+  const plain = input.value.trim();
+  if (!plain) return;
+  const encoded = await encodeOutgoing(plain);
+  stomp.send('/app/chat.dm', {}, JSON.stringify({
+    to: currentPeer,
+    content: encoded.content,
+    encrypted: encoded.encrypted
+  }));
   input.value = '';
-
-  clearTyping(user);
 }
 
-function sendEmpty(user) {
-  if (!state[user].connected) return;
-  const room = ROOM_ID()[user];
-  state[user].client.send('/app/chat.send/' + room, {},
-    JSON.stringify({ content: '', roomId: room })
-  );
-  log(user + ' SEND empty msg (should trigger VALIDATION_ERROR)', 'err');
-}
+async function handleIncomingMessage(msg) {
+  if (msg.type !== 'CHAT' || !msg.id) return;
+  if (renderedIds.has(msg.id)) return;
+  renderedIds.add(msg.id);
 
-function sendTyping(user, isTyping) {
-  if (!state[user].connected) return;
-  const room = ROOM_ID()[user];
-  const type = isTyping ? 'TYPING' : 'STOP_TYPING';
-  state[user].client.send('/app/chat.typing/' + room, {},
-    JSON.stringify({ type, roomId: room })
-  );
-  log(user + ' SEND ' + type, 'sys');
-}
+  const peer = (msg.from === myPhone) ? msg.to : msg.from;
+  if (!messagesByPeer[peer]) messagesByPeer[peer] = [];
 
-function sendSeen(user, msgId, originalSender) {
-  if (!state[user].connected) return;
-  if (seenSentIds[user].has(msgId)) return;
-  const room = ROOM_ID()[user];
-  state[user].client.send('/app/chat.seen', {},
-    JSON.stringify({ type: 'SEEN', seenMessageId: msgId, to: originalSender, roomId: room })
-  );
-  seenSentIds[user].add(msgId);
-  log(user + ' SEND SEEN for msg ' + msgId, 'out');
-}
+  const decoded = await decodeIncoming(msg.content, !!msg.encrypted);
+  const safeMsg = { ...msg, content: decoded.content };
+  messagesByPeer[peer].push(safeMsg);
 
-function sendDelivered(user, msgId, originalSender) {
-  if (!state[user].connected) return;
-  if (deliveredSentIds[user].has(msgId)) return;
-  const room = ROOM_ID()[user];
-  state[user].client.send('/app/chat.delivered', {},
-    JSON.stringify({ type: 'DELIVERED', deliveredMessageId: msgId, to: originalSender, roomId: room })
-  );
-  deliveredSentIds[user].add(msgId);
-  log(user + ' SEND DELIVERED for msg ' + msgId, 'out');
-}
+  if (decoded.error) showError('chat-error', decoded.error);
+  if (peer === currentPeer) renderConversation();
+  if (peer !== currentPeer) log(`New message from ${peer}`);
 
-let typingTimers = { alice: null, bob: null };
-
-function handleTyping(user) {
-  sendTyping(user, true);
-  clearTimeout(typingTimers[user]);
-  typingTimers[user] = setTimeout(() => sendTyping(user, false), 3000);
-}
-
-function clearTyping(user) {
-  clearTimeout(typingTimers[user]);
-  sendTyping(user, false);
-}
-
-function handleKey(event, user) {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    sendMsg(user);
+  if (msg.from !== myPhone) {
+    sendDelivered(msg.id);
+    setTimeout(() => sendSeen(msg.id), 900);
   }
 }
 
-function updateUI(user, connected) {
-  const dot  = document.getElementById(user + '-dot');
-  const btn  = document.getElementById(user + '-connect-btn');
-  const ids  = ['send','typing-btn','stop-btn','err-btn'];
+function handleNotification(msg) {
+  if (msg.type === 'DELIVERED') {
+    updateTick(msg.deliveredMessageId, 'delivered');
+    return;
+  }
+  if (msg.type === 'SEEN') {
+    updateTick(msg.seenMessageId, 'seen');
+  }
+}
 
-  dot.classList.toggle('connected', connected);
-  btn.textContent = connected ? 'Disconnect' : 'Connect';
-  btn.classList.toggle('connected', connected);
+function renderConversation() {
+  const box = document.getElementById('messages');
+  box.innerHTML = '';
+  const list = messagesByPeer[currentPeer] || [];
+  list.forEach((msg) => {
+    const mine = msg.from === myPhone;
+    const wrap = document.createElement('div');
+    wrap.className = `msg ${mine ? 'mine' : 'theirs'}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = msg.content;
+    wrap.appendChild(bubble);
 
-  document.getElementById(user + '-input').disabled = !connected;
-  ids.forEach(id => {
-    const el = document.getElementById(user + '-' + id);
-    if (el) el.disabled = !connected;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const ts = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    meta.innerHTML = `<span>${mine ? 'You' : msg.from}</span><span>${ts}</span>`;
+    if (mine) {
+      const tick = document.createElement('span');
+      tick.id = `tick-${msg.id}`;
+      tick.className = 'tick';
+      tick.textContent = '\u2713';
+      tick.title = 'Sent';
+      meta.appendChild(tick);
+    }
+    wrap.appendChild(meta);
+    box.appendChild(wrap);
   });
+  box.scrollTop = box.scrollHeight;
+}
+
+function updateTick(messageId, state) {
+  if (!messageId) return;
+  const tick = document.getElementById(`tick-${messageId}`);
+  if (!tick) return;
+  tick.textContent = '\u2713\u2713';
+  tick.classList.toggle('seen', state === 'seen');
+  tick.title = state === 'seen' ? 'Seen' : 'Delivered';
+}
+
+function sendDelivered(messageId) {
+  if (!stomp || sentDelivered.has(messageId)) return;
+  sentDelivered.add(messageId);
+  stomp.send('/app/chat.delivered', {}, JSON.stringify({ deliveredMessageId: messageId }));
+}
+
+function sendSeen(messageId) {
+  if (!stomp || sentSeen.has(messageId)) return;
+  sentSeen.add(messageId);
+  stomp.send('/app/chat.seen', {}, JSON.stringify({ seenMessageId: messageId }));
+}
+
+async function encodeOutgoing(plainText) {
+  const keyText = document.getElementById('shared-key').value;
+  if (!keyText) return { content: plainText, encrypted: false };
+  try {
+    const key = await deriveAesKey(keyText);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plainText));
+    return { content: `${bytesToBase64(iv)}:${bytesToBase64(new Uint8Array(cipher))}`, encrypted: true };
+  } catch (_) {
+    return { content: plainText, encrypted: false };
+  }
+}
+
+async function decodeIncoming(content, encrypted) {
+  if (!encrypted) return { content };
+  const keyText = document.getElementById('shared-key').value;
+  if (!keyText) return { content: '[Encrypted message]', error: 'Missing shared key for encrypted message.' };
+  try {
+    const [ivPart, dataPart] = String(content || '').split(':');
+    const key = await deriveAesKey(keyText);
+    const plain = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64ToBytes(ivPart) },
+      key,
+      base64ToBytes(dataPart)
+    );
+    return { content: new TextDecoder().decode(plain) };
+  } catch (_) {
+    return { content: '[Encrypted message]', error: 'Failed to decrypt message. Check shared key.' };
+  }
+}
+
+async function deriveAesKey(passphrase) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(passphrase));
+  return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 </script>
 </body>

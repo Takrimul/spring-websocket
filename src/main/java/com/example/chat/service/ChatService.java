@@ -1,14 +1,13 @@
 package com.example.chat.service;
 
+import com.example.chat.entity.DirectMessageEntity;
 import com.example.chat.model.ChatMessage;
+import com.example.chat.repository.DirectMessageRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.Instant;
+import java.util.*;
 
 /**
  * ============================================================
@@ -29,9 +28,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ChatService {
 
     private static final int MAX_CONTENT_LENGTH = 2000; // characters
-    private static final int ROOM_HISTORY_LIMIT = 100;
-    private final Map<String, Deque<ChatMessage>> roomHistory = new ConcurrentHashMap<>();
-    private final Map<String, Deque<ChatMessage>> pendingByUserRoom = new ConcurrentHashMap<>();
+    @Autowired
+    private DirectMessageRepository directMessageRepository;
 
     /**
      * Validates an incoming ChatMessage.
@@ -73,56 +71,97 @@ public class ChatService {
         return content.length() > 50 ? content.substring(0, 47) + "..." : content;
     }
 
-    public void storeRoomMessage(ChatMessage message) {
-        if (message == null || message.getRoomId() == null || message.getRoomId().isBlank()) {
-            return;
-        }
+    public ChatMessage persistDirectMessage(String senderPhone, String receiverPhone, ChatMessage incomingMessage) {
+        validate(incomingMessage);
+        ChatMessage outgoing = ChatMessage.chat(senderPhone, receiverPhone, null, incomingMessage.getContent());
+        outgoing.setEncrypted(Boolean.TRUE.equals(incomingMessage.getEncrypted()));
 
-        roomHistory.compute(message.getRoomId(), (roomId, queue) -> {
-            Deque<ChatMessage> history = (queue != null) ? queue : new ArrayDeque<>();
-            history.addLast(message);
-            while (history.size() > ROOM_HISTORY_LIMIT) {
-                history.removeFirst();
+        DirectMessageEntity entity = new DirectMessageEntity();
+        entity.setId(UUID.fromString(outgoing.getId()));
+        entity.setSenderPhone(senderPhone);
+        entity.setReceiverPhone(receiverPhone);
+        entity.setContent(outgoing.getContent());
+        entity.setEncrypted(Boolean.TRUE.equals(outgoing.getEncrypted()));
+        entity.setStatus(DirectMessageEntity.Status.SENT.name());
+        entity.setCreatedAt(outgoing.getTimestamp());
+        directMessageRepository.save(entity);
+        return outgoing;
+    }
+
+    public List<ChatMessage> getConversation(String userPhone, String peerPhone) {
+        List<DirectMessageEntity> out = directMessageRepository
+                .findTop100BySenderPhoneAndReceiverPhoneOrderByCreatedAtAsc(userPhone, peerPhone);
+        List<DirectMessageEntity> in = directMessageRepository
+                .findTop100ByReceiverPhoneAndSenderPhoneOrderByCreatedAtAsc(userPhone, peerPhone);
+        List<DirectMessageEntity> merged = new ArrayList<>(out.size() + in.size());
+        merged.addAll(out);
+        merged.addAll(in);
+        merged.sort(Comparator.comparing(DirectMessageEntity::getCreatedAt));
+        List<ChatMessage> messages = new ArrayList<>();
+        for (DirectMessageEntity entity : merged) {
+            messages.add(toChatMessage(entity, false));
+        }
+        return messages;
+    }
+
+    public List<ChatMessage> getPendingForUser(String userPhone) {
+        List<DirectMessageEntity> pending = directMessageRepository
+                .findByReceiverPhoneAndStatusOrderByCreatedAtAsc(userPhone, DirectMessageEntity.Status.SENT.name());
+        List<ChatMessage> result = new ArrayList<>();
+        for (DirectMessageEntity entity : pending) {
+            result.add(toChatMessage(entity, true));
+        }
+        return result;
+    }
+
+    public Optional<ChatMessage> markDelivered(String receiverPhone, String messageId) {
+        Optional<DirectMessageEntity> maybe = directMessageRepository
+                .findByIdAndReceiverPhone(UUID.fromString(messageId), receiverPhone);
+        if (maybe.isEmpty()) {
+            return Optional.empty();
+        }
+        DirectMessageEntity entity = maybe.get();
+        if (DirectMessageEntity.Status.SENT.name().equals(entity.getStatus())) {
+            entity.setStatus(DirectMessageEntity.Status.DELIVERED.name());
+            entity.setDeliveredAt(Instant.now());
+            directMessageRepository.save(entity);
+        }
+        return Optional.of(ChatMessage.delivered(receiverPhone, messageId, null));
+    }
+
+    public Optional<ChatMessage> markSeen(String receiverPhone, String messageId) {
+        Optional<DirectMessageEntity> maybe = directMessageRepository
+                .findByIdAndReceiverPhone(UUID.fromString(messageId), receiverPhone);
+        if (maybe.isEmpty()) {
+            return Optional.empty();
+        }
+        DirectMessageEntity entity = maybe.get();
+        if (!DirectMessageEntity.Status.SEEN.name().equals(entity.getStatus())) {
+            entity.setStatus(DirectMessageEntity.Status.SEEN.name());
+            if (entity.getDeliveredAt() == null) {
+                entity.setDeliveredAt(Instant.now());
             }
-            return history;
-        });
+            entity.setSeenAt(Instant.now());
+            directMessageRepository.save(entity);
+        }
+        return Optional.of(ChatMessage.seen(receiverPhone, messageId, null));
     }
 
-    public List<ChatMessage> getRecentRoomMessages(String roomId) {
-        if (roomId == null || roomId.isBlank()) {
-            return List.of();
-        }
-        Deque<ChatMessage> history = roomHistory.get(roomId);
-        if (history == null || history.isEmpty()) {
-            return List.of();
-        }
-        return new ArrayList<>(history);
+    public Optional<String> findSenderByMessageId(String messageId) {
+        return directMessageRepository.findById(UUID.fromString(messageId))
+                .map(DirectMessageEntity::getSenderPhone);
     }
 
-    public void queuePendingMessage(String username, String roomId, ChatMessage message) {
-        if (username == null || username.isBlank() || roomId == null || roomId.isBlank() || message == null) {
-            return;
-        }
-        String key = username + "|" + roomId;
-        pendingByUserRoom.compute(key, (k, queue) -> {
-            Deque<ChatMessage> pending = (queue != null) ? queue : new ArrayDeque<>();
-            pending.addLast(message);
-            while (pending.size() > ROOM_HISTORY_LIMIT) {
-                pending.removeFirst();
-            }
-            return pending;
-        });
-    }
-
-    public List<ChatMessage> drainPendingMessages(String username, String roomId) {
-        if (username == null || username.isBlank() || roomId == null || roomId.isBlank()) {
-            return List.of();
-        }
-        String key = username + "|" + roomId;
-        Deque<ChatMessage> pending = pendingByUserRoom.remove(key);
-        if (pending == null || pending.isEmpty()) {
-            return List.of();
-        }
-        return new ArrayList<>(pending);
+    private ChatMessage toChatMessage(DirectMessageEntity entity, boolean history) {
+        ChatMessage message = new ChatMessage();
+        message.setId(entity.getId().toString());
+        message.setType(ChatMessage.Type.CHAT);
+        message.setFrom(entity.getSenderPhone());
+        message.setTo(entity.getReceiverPhone());
+        message.setContent(entity.getContent());
+        message.setEncrypted(entity.isEncrypted());
+        message.setTimestamp(entity.getCreatedAt());
+        message.setHistory(history);
+        return message;
     }
 }

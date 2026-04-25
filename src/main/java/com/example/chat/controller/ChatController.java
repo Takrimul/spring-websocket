@@ -1,5 +1,6 @@
 package com.example.chat.controller;
 
+import com.example.chat.events.WebSocketEventListener;
 import com.example.chat.model.ChatMessage;
 import com.example.chat.service.ChatService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,6 +11,7 @@ import org.springframework.messaging.simp.annotation.SendToUser;
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
+import java.util.Set;
 
 /**
  * ============================================================
@@ -62,6 +64,9 @@ public class ChatController {
 
     @Autowired
     private ChatService chatService;
+
+    @Autowired
+    private WebSocketEventListener webSocketEventListener;
 
     // =========================================================================
     // 1. SEND CHAT MESSAGE
@@ -118,6 +123,7 @@ public class ChatController {
                 senderUsername, roomId, incomingMessage.getContent());
 
         chatService.storeRoomMessage(outgoing);
+        queueForOfflineRoomMembers(outgoing, senderUsername, roomId);
 
         // Return value is automatically sent to /topic/chat.room.{roomId}
         // All subscribers (including Alice herself) receive it.
@@ -131,17 +137,13 @@ public class ChatController {
         }
 
         String username = principal.getName();
+        for (ChatMessage pending : chatService.drainPendingMessages(username, roomId)) {
+            ChatMessage replay = toReplayMessage(pending);
+            messagingTemplate.convertAndSendToUser(username, "/queue/history", replay);
+        }
+
         for (ChatMessage message : chatService.getRecentRoomMessages(roomId)) {
-            ChatMessage replay = new ChatMessage();
-            replay.setId(message.getId());
-            replay.setType(message.getType());
-            replay.setFrom(message.getFrom());
-            replay.setTo(message.getTo());
-            replay.setContent(message.getContent());
-            replay.setRoomId(message.getRoomId());
-            replay.setSeenMessageId(message.getSeenMessageId());
-            replay.setTimestamp(message.getTimestamp());
-            replay.setHistory(true);
+            ChatMessage replay = toReplayMessage(message);
             messagingTemplate.convertAndSendToUser(username, "/queue/history", replay);
         }
     }
@@ -265,6 +267,7 @@ public class ChatController {
         }
 
         ChatMessage seenReceipt = ChatMessage.seen(reader, seenMsgId, event.getRoomId());
+        seenReceipt.setTo(originalSender);
 
         // Notify the original sender that their message was seen
         messagingTemplate.convertAndSendToUser(
@@ -272,9 +275,37 @@ public class ChatController {
                 "/queue/notifications",
                 seenReceipt
         );
+        // Fallback path: also publish to room topic; target user filters client-side.
+        messagingTemplate.convertAndSend("/topic/chat.room." + event.getRoomId(), seenReceipt);
 
         System.out.printf("[SEEN] %s saw message:%s (by %s)%n",
                 reader, seenMsgId, originalSender);
+    }
+
+    @MessageMapping("/chat.delivered")
+    public void handleDelivered(@Payload ChatMessage event, Principal principal) {
+        if (principal == null) throw new IllegalStateException("Unauthenticated");
+
+        String receiver = principal.getName();
+        String originalSender = event.getTo();
+        String deliveredMsgId = event.getDeliveredMessageId();
+
+        if (deliveredMsgId == null || deliveredMsgId.isBlank()) {
+            sendErrorToUser(receiver, "INVALID_DELIVERED", "deliveredMessageId is required");
+            return;
+        }
+
+        ChatMessage deliveredReceipt = ChatMessage.delivered(receiver, deliveredMsgId, event.getRoomId());
+        deliveredReceipt.setTo(originalSender);
+        messagingTemplate.convertAndSendToUser(
+                originalSender,
+                "/queue/notifications",
+                deliveredReceipt
+        );
+        // Fallback path: also publish to room topic; target user filters client-side.
+        messagingTemplate.convertAndSend("/topic/chat.room." + event.getRoomId(), deliveredReceipt);
+        System.out.printf("[DELIVERED] %s received message:%s (by %s)%n",
+                receiver, deliveredMsgId, originalSender);
     }
 
     // =========================================================================
@@ -369,5 +400,33 @@ public class ChatController {
                 "/queue/errors",
                 ChatMessage.error(code, detail)
         );
+    }
+
+    private void queueForOfflineRoomMembers(ChatMessage outgoing, String senderUsername, String roomId) {
+        Set<String> roomMembers = webSocketEventListener.getRoomMembers(roomId);
+        Set<String> onlineUsers = webSocketEventListener.getOnlineUsers(roomId);
+        for (String member : roomMembers) {
+            if (member == null || member.equals(senderUsername)) {
+                continue;
+            }
+            if (!onlineUsers.contains(member)) {
+                chatService.queuePendingMessage(member, roomId, outgoing);
+            }
+        }
+    }
+
+    private ChatMessage toReplayMessage(ChatMessage message) {
+        ChatMessage replay = new ChatMessage();
+        replay.setId(message.getId());
+        replay.setType(message.getType());
+        replay.setFrom(message.getFrom());
+        replay.setTo(message.getTo());
+        replay.setContent(message.getContent());
+        replay.setRoomId(message.getRoomId());
+        replay.setSeenMessageId(message.getSeenMessageId());
+        replay.setDeliveredMessageId(message.getDeliveredMessageId());
+        replay.setTimestamp(message.getTimestamp());
+        replay.setHistory(true);
+        return replay;
     }
 }

@@ -1,6 +1,7 @@
 package com.example.chat.events;
 
 import com.example.chat.model.ChatMessage;
+import com.example.chat.service.ChatService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -11,6 +12,7 @@ import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 import org.springframework.web.socket.messaging.SessionSubscribeEvent;
 
 import java.security.Principal;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -50,12 +52,16 @@ public class WebSocketEventListener {
     @Autowired
     private SimpMessagingTemplate messagingTemplate;
 
+    @Autowired
+    private ChatService chatService;
+
     /**
      * Room presence: which users are in each room.
      * roomId → Set of online usernames.
      * ConcurrentHashMap + ConcurrentHashMap.newKeySet() = thread-safe.
      */
     private final Map<String, Set<String>> roomPresence = new ConcurrentHashMap<>();
+    private final Map<String, Set<String>> roomMembers = new ConcurrentHashMap<>();
 
     /**
      * Session → room mapping so we know which room to update on disconnect.
@@ -180,6 +186,9 @@ public class WebSocketEventListener {
             roomPresence
                     .computeIfAbsent(roomId, k -> ConcurrentHashMap.newKeySet())
                     .add(username);
+            roomMembers
+                    .computeIfAbsent(roomId, k -> ConcurrentHashMap.newKeySet())
+                    .add(username);
 
             // Track session → room for disconnect cleanup
             sessionRoomMap.put(sessionId, roomId);
@@ -192,6 +201,22 @@ public class WebSocketEventListener {
                     "/topic/chat.room." + roomId, joinMsg
             );
 
+            // Replay pending offline messages immediately on room subscribe.
+            for (ChatMessage pending : chatService.drainPendingMessages(username, roomId)) {
+                ChatMessage replay = new ChatMessage();
+                replay.setId(pending.getId());
+                replay.setType(pending.getType());
+                replay.setFrom(pending.getFrom());
+                replay.setTo(pending.getTo());
+                replay.setContent(pending.getContent());
+                replay.setRoomId(pending.getRoomId());
+                replay.setSeenMessageId(pending.getSeenMessageId());
+                replay.setDeliveredMessageId(pending.getDeliveredMessageId());
+                replay.setTimestamp(pending.getTimestamp());
+                replay.setHistory(true);
+                messagingTemplate.convertAndSendToUser(username, "/queue/history", replay);
+            }
+
             System.out.printf("[EVENT] %s subscribed to room:%s | online: %s%n",
                     username, roomId, roomPresence.get(roomId));
         }
@@ -203,6 +228,10 @@ public class WebSocketEventListener {
 
     /** Returns the set of usernames currently online in a room. */
     public Set<String> getOnlineUsers(String roomId) {
-        return roomPresence.getOrDefault(roomId, Set.of());
+        return new HashSet<>(roomPresence.getOrDefault(roomId, Set.of()));
+    }
+
+    public Set<String> getRoomMembers(String roomId) {
+        return new HashSet<>(roomMembers.getOrDefault(roomId, Set.of()));
     }
 }

@@ -354,6 +354,18 @@ const state = {
 };
 
 const seenMap = {};
+const renderedMessageIds = {
+  alice: new Set(),
+  bob: new Set(),
+};
+const deliveredSentIds = {
+  alice: new Set(),
+  bob: new Set(),
+};
+const seenSentIds = {
+  alice: new Set(),
+  bob: new Set(),
+};
 
 function log(text, type = '') {
   const el = document.getElementById('log-lines');
@@ -397,7 +409,7 @@ function connect(user) {
 
     const roomId = ROOM_ID()[user];
 
-    client.subscribe('/topic/chat.room.' + roomId, (msg) => {
+    client.subscribe('/user/queue/history', (msg) => {
       const data = JSON.parse(msg.body);
       handleIncoming(user, data);
     });
@@ -413,13 +425,14 @@ function connect(user) {
       appendError(user, data.errorCode + ': ' + data.errorDetail);
     });
 
-    client.subscribe('/user/queue/history', (msg) => {
+    client.subscribe('/topic/chat.room.' + roomId, (msg) => {
       const data = JSON.parse(msg.body);
       handleIncoming(user, data);
     });
 
     appendSystem(user, 'Connected to room ' + roomId);
-    state[user].client.send('/app/chat.history/' + roomId, {}, JSON.stringify({ roomId }));
+    requestHistory(user, roomId, 250);
+    requestHistory(user, roomId, 900);
 
   }, (err) => {
     log(user + ': connection error: ' + err, 'err');
@@ -460,18 +473,43 @@ function handleIncoming(user, data) {
     return;
   }
 
+  if (data.type === 'DELIVERED' || data.type === 'SEEN') {
+    if (data.to && data.to !== user) return;
+    handleNotification(user, data);
+    return;
+  }
+
   if (data.type === 'CHAT') {
+    if (data.id && renderedMessageIds[user].has(data.id)) {
+      return;
+    }
     const isMine = data.from === me;
     appendMessage(user, data, isMine);
+    if (data.id) renderedMessageIds[user].add(data.id);
     log(user + ' RECV CHAT from ' + data.from + ': ' + data.content + (data.history ? ' [history]' : ''), '');
 
-    if (!isMine && !data.history) {
+    if (!isMine && data.id) {
+      sendDelivered(user, data.id, data.from);
       setTimeout(() => sendSeen(user, data.id, data.from), 1200);
     }
   }
 }
 
+function requestHistory(user, roomId, delayMs) {
+  setTimeout(() => {
+    if (!state[user].connected || !state[user].client) return;
+    state[user].client.send('/app/chat.history/' + roomId, {}, JSON.stringify({ roomId }));
+    log(user + ' REQUEST history for room ' + roomId + ' (+' + delayMs + 'ms)', 'sys');
+  }, delayMs);
+}
+
 function handleNotification(user, data) {
+  if (data.type === 'DELIVERED') {
+    log(user + ': message ' + data.deliveredMessageId + ' was DELIVERED to ' + data.from, 'out');
+    markDelivered(user, data.deliveredMessageId);
+    return;
+  }
+
   if (data.type === 'SEEN') {
     log(user + ': message ' + data.seenMessageId + ' was SEEN by ' + data.from, 'out');
     markSeen(user, data.seenMessageId);
@@ -498,7 +536,8 @@ function appendMessage(user, data, isMine) {
     const tick = document.createElement('span');
     tick.className = 'tick';
     tick.id = 'tick-' + data.id;
-    tick.textContent = '\u2713\u2713';
+    tick.textContent = '\u2713';
+    tick.title = 'Sent';
     meta.appendChild(tick);
   }
 
@@ -510,8 +549,17 @@ function appendMessage(user, data, isMine) {
 function markSeen(user, msgId) {
   const tick = document.getElementById('tick-' + msgId);
   if (tick) {
+    tick.textContent = '\u2713\u2713';
     tick.classList.add('seen');
     tick.title = 'Seen';
+  }
+}
+
+function markDelivered(user, msgId) {
+  const tick = document.getElementById('tick-' + msgId);
+  if (tick) {
+    tick.textContent = '\u2713\u2713';
+    tick.title = 'Delivered';
   }
 }
 
@@ -569,11 +617,24 @@ function sendTyping(user, isTyping) {
 
 function sendSeen(user, msgId, originalSender) {
   if (!state[user].connected) return;
+  if (seenSentIds[user].has(msgId)) return;
   const room = ROOM_ID()[user];
   state[user].client.send('/app/chat.seen', {},
     JSON.stringify({ type: 'SEEN', seenMessageId: msgId, to: originalSender, roomId: room })
   );
+  seenSentIds[user].add(msgId);
   log(user + ' SEND SEEN for msg ' + msgId, 'out');
+}
+
+function sendDelivered(user, msgId, originalSender) {
+  if (!state[user].connected) return;
+  if (deliveredSentIds[user].has(msgId)) return;
+  const room = ROOM_ID()[user];
+  state[user].client.send('/app/chat.delivered', {},
+    JSON.stringify({ type: 'DELIVERED', deliveredMessageId: msgId, to: originalSender, roomId: room })
+  );
+  deliveredSentIds[user].add(msgId);
+  log(user + ' SEND DELIVERED for msg ' + msgId, 'out');
 }
 
 let typingTimers = { alice: null, bob: null };

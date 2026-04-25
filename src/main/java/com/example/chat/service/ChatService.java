@@ -31,6 +31,7 @@ public class ChatService {
     private static final int MAX_CONTENT_LENGTH = 2000; // characters
     private static final int ROOM_HISTORY_LIMIT = 100;
     private final Map<String, Deque<ChatMessage>> roomHistory = new ConcurrentHashMap<>();
+    private final Map<String, Deque<ChatMessage>> pendingByUserRoom = new ConcurrentHashMap<>();
 
     /**
      * Validates an incoming ChatMessage.
@@ -96,5 +97,32 @@ public class ChatService {
             return List.of();
         }
         return new ArrayList<>(history);
+    }
+
+    public void queuePendingMessage(String username, String roomId, ChatMessage message) {
+        if (username == null || username.isBlank() || roomId == null || roomId.isBlank() || message == null) {
+            return;
+        }
+        String key = username + "|" + roomId;
+        pendingByUserRoom.compute(key, (k, queue) -> {
+            Deque<ChatMessage> pending = (queue != null) ? queue : new ArrayDeque<>();
+            pending.addLast(message);
+            while (pending.size() > ROOM_HISTORY_LIMIT) {
+                pending.removeFirst();
+            }
+            return pending;
+        });
+    }
+
+    public List<ChatMessage> drainPendingMessages(String username, String roomId) {
+        if (username == null || username.isBlank() || roomId == null || roomId.isBlank()) {
+            return List.of();
+        }
+        String key = username + "|" + roomId;
+        Deque<ChatMessage> pending = pendingByUserRoom.remove(key);
+        if (pending == null || pending.isEmpty()) {
+            return List.of();
+        }
+        return new ArrayList<>(pending);
     }
 }

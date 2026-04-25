@@ -37,6 +37,8 @@ public class ChatMessage {
     public enum Type {
         /** Normal chat message */
         CHAT,
+        /** Recipient device received message */
+        DELIVERED,
         /** Sender started typing */
         TYPING,
         /** Sender stopped typing */
@@ -56,6 +58,7 @@ public class ChatMessage {
     private String content;      // Message text (null for TYPING, SEEN, etc.)
     private String roomId;       // Chat room identifier
     private String seenMessageId;// For SEEN events: which message was seen
+    private String deliveredMessageId; // For DELIVERED events: which message was delivered
     private Boolean history;     // true if replayed from server-side room history
     private Instant timestamp;   // Server-assigned, prevents client clock skew
     private String errorCode;    // For ERROR type: machine-readable error key
@@ -98,6 +101,18 @@ public class ChatMessage {
         m.seenMessageId = seenMessageId;
         m.roomId       = roomId;
         m.timestamp    = Instant.now();
+        return m;
+    }
+
+    /** Factory: delivered receipt */
+    public static ChatMessage delivered(String from, String deliveredMessageId, String roomId) {
+        ChatMessage m = new ChatMessage();
+        m.id = UUID.randomUUID().toString();
+        m.type = Type.DELIVERED;
+        m.from = from;
+        m.deliveredMessageId = deliveredMessageId;
+        m.roomId = roomId;
+        m.timestamp = Instant.now();
         return m;
     }
 
@@ -146,6 +161,9 @@ public class ChatMessage {
 
     public String getSeenMessageId() { return seenMessageId; }
     public void setSeenMessageId(String seenMessageId) { this.seenMessageId = seenMessageId; }
+
+    public String getDeliveredMessageId() { return deliveredMessageId; }
+    public void setDeliveredMessageId(String deliveredMessageId) { this.deliveredMessageId = deliveredMessageId; }
 
     public Boolean getHistory() { return history; }
     public void setHistory(Boolean history) { this.history = history; }

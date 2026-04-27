@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat - DuoChat</title>
+    <link rel="stylesheet" th:href="@{/css/chat.css}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+</head>
+<body>
+    <div class="chat-container">
+        <header class="chat-header">
+            <div class="user-info">
+                <h2 id="me-phone">My Phone</h2>
+                <span id="ws-status" class="status">Connecting...</span>
+            </div>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </header>
+
+        <main class="chat-main">
+            <div class="chat-controls">
+                <input type="text" id="peer-phone" placeholder="Receiver phone (+880...)">
+                <button onclick="openChat()">Open Chat</button>
+            </div>
+            
+            <div class="messages-area" id="messages">
+                <!-- Messages will appear here -->
+            </div>
+
+            <div id="chat-error" class="error-msg"></div>
+
+            <div class="input-area">
+                <input type="text" id="message-input" placeholder="Type a message..." onkeydown="if(event.key==='Enter') sendMessage()">
+                <button onclick="sendMessage()">Send</button>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const SERVER = window.location.origin + '/ws';
+        let token = sessionStorage.getItem('chat_token');
+        let myPhone = sessionStorage.getItem('chat_phone');
+        let currentPeer = null;
+        let stomp = null;
+        const renderedIds = new Set();
+        const sentDelivered = new Set();
+        const sentSeen = new Set();
+        const messagesByPeer = {};
+
+        if (!token || !myPhone) {
+            window.location.href = '/login';
+        }
+
+        document.getElementById('me-phone').textContent = myPhone;
+
+        function connectWs() {
+            const socket = new SockJS(SERVER);
+            stomp = Stomp.over(socket);
+            stomp.debug = null;
+            
+            stomp.connect({ Authorization: `Bearer ${token}` }, () => {
+                document.getElementById('ws-status').textContent = 'Connected';
+                document.getElementById('ws-status').classList.add('online');
+                
+                stomp.subscribe('/user/queue/messages', (frame) => {
+                    const msg = JSON.parse(frame.body);
+                    handleIncomingMessage(msg);
+                });
+                
+                stomp.subscribe('/user/queue/notifications', (frame) => {
+                    const msg = JSON.parse(frame.body);
+                    handleNotification(msg);
+                });
+                
+                stomp.subscribe('/user/queue/errors', (frame) => {
+                    const msg = JSON.parse(frame.body);
+                    showError(msg.errorDetail || msg.errorCode);
+                });
+            }, (err) => {
+                document.getElementById('ws-status').textContent = 'Disconnected';
+                document.getElementById('ws-status').classList.remove('online');
+                setTimeout(connectWs, 5000); // Reconnect
+            });
+        }
+
+        function showError(text) {
+            const el = document.getElementById('chat-error');
+            el.textContent = text;
+            setTimeout(() => el.textContent = '', 5000);
+        }
+
+        function logout() {
+            sessionStorage.clear();
+            if (stomp) stomp.disconnect();
+            window.location.href = '/login';
+        }
+
+        function normalizePhoneInput(v) {
+            let p = String(v || '').trim().replace(/[\s\-()]/g, '');
+            if (p && !p.startsWith('+')) p = '+' + p;
+            return p;
+        }
+
+        function openChat() {
+            const peer = normalizePhoneInput(document.getElementById('peer-phone').value);
+            if (!peer) {
+                showError('Receiver phone is required');
+                return;
+            }
+            if (peer === myPhone) {
+                showError("You can't chat with yourself");
+                return;
+            }
+            currentPeer = peer;
+            if (!messagesByPeer[currentPeer]) messagesByPeer[currentPeer] = [];
+            renderConversation();
+            if (stomp) {
+                stomp.send('/app/chat.sync', {}, JSON.stringify({ withPhone: currentPeer }));
+            }
+        }
+
+        function sendMessage() {
+            if (!stomp || !currentPeer) {
+                showError('Open a chat and connect first');
+                return;
+            }
+            const input = document.getElementById('message-input');
+            const content = input.value.trim();
+            if (!content) return;
+            
+            stomp.send('/app/chat.dm', {}, JSON.stringify({
+                to: currentPeer,
+                content: content,
+                encrypted: false
+            }));
+            input.value = '';
+        }
+
+        function handleIncomingMessage(msg) {
+            if (msg.type !== 'CHAT' || !msg.id) return;
+            if (renderedIds.has(msg.id)) return;
+            renderedIds.add(msg.id);
+
+            const peer = (msg.from === myPhone) ? msg.to : msg.from;
+            if (!messagesByPeer[peer]) messagesByPeer[peer] = [];
+
+            messagesByPeer[peer].push(msg);
+
+            if (peer === currentPeer) {
+                renderConversation();
+                if (msg.from !== myPhone) {
+                    sendDelivered(msg.id);
+                    setTimeout(() => sendSeen(msg.id), 500);
+                }
+            }
+        }
+
+        function handleNotification(msg) {
+            if (msg.type === 'DELIVERED') {
+                updateTick(msg.deliveredMessageId, 'delivered');
+            } else if (msg.type === 'SEEN') {
+                updateTick(msg.seenMessageId, 'seen');
+            }
+        }
+
+        function renderConversation() {
+            const box = document.getElementById('messages');
+            box.innerHTML = '';
+            const list = messagesByPeer[currentPeer] || [];
+            list.forEach((msg) => {
+                const mine = msg.from === myPhone;
+                const wrap = document.createElement('div');
+                wrap.className = `msg ${mine ? 'mine' : 'theirs'}`;
+                
+                const bubble = document.createElement('div');
+                bubble.className = 'bubble';
+                bubble.textContent = msg.content;
+                wrap.appendChild(bubble);
+
+                const meta = document.createElement('div');
+                meta.className = 'meta';
+                const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                meta.innerHTML = `<span>${time}</span>`;
+                
+                if (mine) {
+                    const tick = document.createElement('span');
+                    tick.id = `tick-${msg.id}`;
+                    tick.className = 'tick';
+                    tick.textContent = ' \u2713';
+                    meta.appendChild(tick);
+                }
+                
+                wrap.appendChild(meta);
+                box.appendChild(wrap);
+            });
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function updateTick(messageId, state) {
+            const tick = document.getElementById(`tick-${messageId}`);
+            if (!tick) return;
+            tick.textContent = ' \u2713\u2713';
+            if (state === 'seen') {
+                tick.classList.add('seen');
+            }
+        }
+
+        function sendDelivered(messageId) {
+            if (!stomp || sentDelivered.has(messageId)) return;
+            sentDelivered.add(messageId);
+            stomp.send('/app/chat.delivered', {}, JSON.stringify({ deliveredMessageId: messageId }));
+        }
+
+        function sendSeen(messageId) {
+            if (!stomp || sentSeen.has(messageId)) return;
+            sentSeen.add(messageId);
+            stomp.send('/app/chat.seen', {}, JSON.stringify({ seenMessageId: messageId }));
+        }
+
+        // Initialize connection
+        connectWs();
+    </script>
+</body>
+</html>

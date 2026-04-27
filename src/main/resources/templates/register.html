@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - DuoChat</title>
+    <link rel="stylesheet" th:href="@{/css/chat.css}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="card">
+            <h1>Create Account</h1>
+            <p class="subtitle">Join DuoChat today</p>
+            
+            <div class="form-group">
+                <label for="reg-phone">Phone Number</label>
+                <input type="text" id="reg-phone" placeholder="+8801XXXXXXXXX">
+            </div>
+            
+            <div class="form-group">
+                <label for="reg-pass">Password</label>
+                <input type="password" id="reg-pass" placeholder="At least 8 characters">
+            </div>
+            
+            <button id="register-btn" onclick="register()">Create Account</button>
+            
+            <div id="auth-error" class="error-msg"></div>
+            
+            <div class="footer-link">
+                Already have an account? <a th:href="@{/login}">Login</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function api(path, body) {
+            const res = await fetch(path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+            return data;
+        }
+
+        async function register() {
+            const errorEl = document.getElementById('auth-error');
+            const btn = document.getElementById('register-btn');
+            errorEl.textContent = '';
+            
+            const phone = document.getElementById('reg-phone').value.trim();
+            const password = document.getElementById('reg-pass').value;
+
+            if (!phone || !password) {
+                errorEl.textContent = 'Please fill in all fields';
+                return;
+            }
+
+            try {
+                btn.disabled = true;
+                btn.textContent = 'Creating...';
+                
+                const data = await api('/api/auth/register', { phone, password });
+                
+                // Store in session
+                sessionStorage.setItem('chat_token', data.token);
+                sessionStorage.setItem('chat_phone', data.phone);
+                
+                window.location.href = '/chat';
+            } catch (e) {
+                errorEl.textContent = e.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Create Account';
+            }
+        }
+    </script>
+</body>
+</html>

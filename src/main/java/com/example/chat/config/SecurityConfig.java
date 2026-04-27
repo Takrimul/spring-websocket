@@ -17,10 +17,14 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/", "/chat-test-client.html", "/api/auth/**", "/ws/**").permitAll()
+                        .requestMatchers("/", "/register", "/login", "/chat", "/chat-test-client.html", "/api/auth/**", "/ws/**", "/css/**", "/js/**").permitAll()
                         .anyRequest().authenticated())
-                .httpBasic(Customizer.withDefaults())
                 .build();
+    }
+
+    @Bean
+    public org.springframework.security.core.userdetails.UserDetailsService userDetailsService() {
+        return new org.springframework.security.provisioning.InMemoryUserDetailsManager();
     }
 
     @Bean

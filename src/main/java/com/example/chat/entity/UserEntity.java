@@ -1,9 +1,11 @@
 package com.example.chat.entity;
 
 import jakarta.persistence.*;
+import lombok.Data;
 
 import java.time.Instant;
 
+@Data
 @Entity
 @Table(name = "users")
 public class UserEntity {
@@ -19,32 +21,4 @@ public class UserEntity {
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
-
-    public Long getId() {
-        return id;
-    }
-
-    public String getPhone() {
-        return phone;
-    }
-
-    public void setPhone(String phone) {
-        this.phone = phone;
-    }
-
-    public String getPasswordHash() {
-        return passwordHash;
-    }
-
-    public void setPasswordHash(String passwordHash) {
-        this.passwordHash = passwordHash;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
-    }
 }

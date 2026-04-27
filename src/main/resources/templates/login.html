@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - DuoChat</title>
+    <link rel="stylesheet" th:href="@{/css/chat.css}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="card">
+            <h1>Login</h1>
+            <p class="subtitle">Welcome back to DuoChat</p>
+            
+            <div class="form-group">
+                <label for="login-phone">Phone Number</label>
+                <input type="text" id="login-phone" placeholder="+8801XXXXXXXXX">
+            </div>
+            
+            <div class="form-group">
+                <label for="login-pass">Password</label>
+                <input type="password" id="login-pass" placeholder="Enter your password">
+            </div>
+            
+            <button id="login-btn" onclick="login()">Login</button>
+            
+            <div id="auth-error" class="error-msg"></div>
+            
+            <div class="footer-link">
+                Don't have an account? <a th:href="@{/register}">Register</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function api(path, body) {
+            const res = await fetch(path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+            return data;
+        }
+
+        async function login() {
+            const errorEl = document.getElementById('auth-error');
+            const btn = document.getElementById('login-btn');
+            errorEl.textContent = '';
+            
+            const phone = document.getElementById('login-phone').value.trim();
+            const password = document.getElementById('login-pass').value;
+
+            if (!phone || !password) {
+                errorEl.textContent = 'Please fill in all fields';
+                return;
+            }
+
+            try {
+                btn.disabled = true;
+                btn.textContent = 'Logging in...';
+                
+                const data = await api('/api/auth/login', { phone, password });
+                
+                // Store in session
+                sessionStorage.setItem('chat_token', data.token);
+                sessionStorage.setItem('chat_phone', data.phone);
+                
+                window.location.href = '/chat';
+            } catch (e) {
+                errorEl.textContent = e.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Login';
+            }
+        }
+    </script>
+</body>
+</html>

@@ -4,7 +4,7 @@ spring:
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/ws-chat}
     username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:T@krim1234}
+    password: ${DB_PASSWORD:Tak@123}
   jpa:
     hibernate:
       ddl-auto: validate

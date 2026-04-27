@@ -1,6 +1,8 @@
 package com.example.chat.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import lombok.Data;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -27,6 +29,7 @@ import java.util.UUID;
  * @JsonInclude(NON_NULL) means null fields are omitted from JSON.
  * This keeps payloads small — a TYPING event doesn't need "content".
  */
+@Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ChatMessage {
 
@@ -139,48 +142,6 @@ public class ChatMessage {
         m.timestamp   = Instant.now();
         return m;
     }
-
-    // ── Getters & Setters ──────────────────────────────────────────────────────
-    // (Kept verbose so every field is visible — use Lombok @Data in a real project)
-
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
-
-    public Type getType() { return type; }
-    public void setType(Type type) { this.type = type; }
-
-    public String getFrom() { return from; }
-    public void setFrom(String from) { this.from = from; }
-
-    public String getTo() { return to; }
-    public void setTo(String to) { this.to = to; }
-
-    public String getContent() { return content; }
-    public void setContent(String content) { this.content = content; }
-
-    public Boolean getEncrypted() { return encrypted; }
-    public void setEncrypted(Boolean encrypted) { this.encrypted = encrypted; }
-
-    public String getRoomId() { return roomId; }
-    public void setRoomId(String roomId) { this.roomId = roomId; }
-
-    public String getSeenMessageId() { return seenMessageId; }
-    public void setSeenMessageId(String seenMessageId) { this.seenMessageId = seenMessageId; }
-
-    public String getDeliveredMessageId() { return deliveredMessageId; }
-    public void setDeliveredMessageId(String deliveredMessageId) { this.deliveredMessageId = deliveredMessageId; }
-
-    public Boolean getHistory() { return history; }
-    public void setHistory(Boolean history) { this.history = history; }
-
-    public Instant getTimestamp() { return timestamp; }
-    public void setTimestamp(Instant timestamp) { this.timestamp = timestamp; }
-
-    public String getErrorCode() { return errorCode; }
-    public void setErrorCode(String errorCode) { this.errorCode = errorCode; }
-
-    public String getErrorDetail() { return errorDetail; }
-    public void setErrorDetail(String errorDetail) { this.errorDetail = errorDetail; }
 
     @Override
     public String toString() {
